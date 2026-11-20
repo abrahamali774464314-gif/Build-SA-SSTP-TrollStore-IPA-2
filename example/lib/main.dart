@@ -453,7 +453,7 @@ class _SaSstpHomePageState extends State<SaSstpHomePage> {
                 child: Text('لا توجد نتائج مطابقة'),
               )
             else
-              ..._visibleServers.map(_serverTile),
+              ..._visibleServers.map((server) => _serverChoiceTile(server, _selected?.id == server.id)),
             if (selected != null && selected.custom) ...[
               const SizedBox(height: 8),
               Card(
