@@ -30,7 +30,22 @@ jobs:
 
       - name: Build iOS without Apple signing
         working-directory: example
-        run: flutter build ios --release --no-codesign
+        shell: bash
+        env:
+          CODE_SIGNING_ALLOWED: "NO"
+          CODE_SIGNING_REQUIRED: "NO"
+          CODE_SIGN_IDENTITY: ""
+        run: |
+          set -o pipefail
+          flutter build ios --release --no-codesign --verbose 2>&1 | tee ../ios-build-diagnostic.log
+
+      - name: Upload iOS build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-diagnostic-log
+          path: ios-build-diagnostic.log
+          if-no-files-found: warn
 
       - name: Embed TrollStore entitlements with ldid
         shell: bash
