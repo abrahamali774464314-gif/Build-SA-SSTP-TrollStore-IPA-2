@@ -114,7 +114,7 @@
     }
     NSMutableDictionary *body = @{@"username":username, @"password":password, @"port":url.port, @"xx":url.scheme, @"address":url.host, @"remark":remark}.mutableCopy;
     [parameters enumerateObjectsUsingBlock:^(NSString * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
-        NSArray *t = [obj componentsSeparatedByString:@"="];
+        NSArray<NSString *> *t = [obj componentsSeparatedByString:@"="];
         if (t.count == 2) {
             NSString *key = t[0].stringByRemovingPercentEncoding ?: t[0];
             NSString *value = t[1].stringByRemovingPercentEncoding ?: t[1];
