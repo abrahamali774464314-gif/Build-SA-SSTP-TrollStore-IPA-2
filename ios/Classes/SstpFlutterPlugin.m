@@ -184,7 +184,7 @@ static NSString * const kSAProfileDescription = @"SA SSTP";
     NSError *startError = nil;
     @try {
         [self.vpnManager.connection startVPNTunnelWithOptions:@{ @"uri" : uri }
-                                                       error:&startError];
+                                                       andReturnError:&startError];
     } @catch (NSException *exception) {
         startError = [NSError errorWithDomain:@"SA_SSTP"
                                          code:1
