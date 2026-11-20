@@ -1,0 +1,68 @@
+name: Build SA SSTP TrollStore IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter packages
+        working-directory: example
+        run: flutter pub get
+
+      - name: Install CocoaPods
+        working-directory: example/ios
+        run: pod install --repo-update
+
+      - name: Build iOS without Apple signing
+        working-directory: example
+        run: flutter build ios --release --no-codesign
+
+      - name: Embed TrollStore entitlements with ldid
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install ldid
+          APP="example/build/ios/iphoneos/Runner.app"
+          EXT="$APP/PlugIns/sstp_extension.appex"
+          test -d "$APP"
+          test -d "$EXT"
+          APP_EXEC=$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$APP/Info.plist")
+          EXT_EXEC=$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$EXT/Info.plist")
+          ldid -Sexample/ios/Runner/Runner.entitlements "$APP/$APP_EXEC"
+          ldid -Sexample/ios/sstp_extension/sstp_extension.entitlements "$EXT/$EXT_EXEC"
+
+      - name: Package IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="example/build/ios/iphoneos/Runner.app"
+          EXT="$APP/PlugIns/sstp_extension.appex"
+          test -d "$APP"
+          test -d "$EXT"
+          mkdir -p dist/Payload
+          cp -R "$APP" dist/Payload/Runner.app
+          cd dist
+          zip -qry SA_SSTP_TrollStore.ipa Payload
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SA_SSTP_TrollStore_ipa
+          path: dist/SA_SSTP_TrollStore.ipa
+          if-no-files-found: error
+          retention-days: 7
