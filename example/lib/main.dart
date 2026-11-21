@@ -204,7 +204,10 @@ class _SaSstpHomePageState extends State<SaSstpHomePage> {
         port: server.port,
         username: username,
         password: password,
-        androidConfiguration: SSTPAndroidConfiguration(),
+        androidConfiguration: SSTPAndroidConfiguration(
+          verifyHostName: true,
+          verifySSLCert: true,
+        ),
         iosConfiguration: SSTPIOSConfiguration(
           enableTLS: false, // In this plugin this means allowInsecure=false.
           enablePAP: _authMethod == 'PAP',
