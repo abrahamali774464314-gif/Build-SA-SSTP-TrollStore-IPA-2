@@ -51,6 +51,8 @@ internal class SSLTerminal(private val bridge: ClientBridge) {
 
     private val doUseProxy = getBooleanPrefValue(OscPrefKey.PROXY_DO_USE_PROXY, bridge.prefs)
     private val sslHostname = getStringPrefValue(OscPrefKey.HOME_HOSTNAME, bridge.prefs)
+    private val sslServerName = bridge.prefs.getString("SA_SSTP_SERVER_NAME", null)
+        ?.takeIf { it.isNotBlank() } ?: sslHostname
     private val sslPort = getIntPrefValue(OscPrefKey.SSL_PORT, bridge.prefs)
     private val selectedVersion = getStringPrefValue(OscPrefKey.SSL_VERSION, bridge.prefs)
     private val enabledSuites = getSetPrefValue(OscPrefKey.SSL_SUITES, bridge.prefs)
@@ -126,7 +128,7 @@ internal class SSLTerminal(private val bridge: ClientBridge) {
                 }
             }), SecureRandom())
         }
-        engine = sslContext.createSSLEngine(sslHostname, sslPort)
+        engine = sslContext.createSSLEngine(sslServerName, sslPort)
         engine.useClientMode = true
 
         if (selectedVersion != "DEFAULT") {
@@ -186,7 +188,7 @@ internal class SSLTerminal(private val bridge: ClientBridge) {
 
         if (getBooleanPrefValue(OscPrefKey.SSL_DO_VERIFY, bridge.prefs)) {
             HttpsURLConnection.getDefaultHostnameVerifier().also {
-                if (!it.verify(sslHostname, engine.session)) {
+                if (!it.verify(sslServerName, engine.session)) {
                     bridge.controlMailbox.send(ControlMessage(Where.SSL, Result.ERR_VERIFICATION_FAILED))
                     return false
                 }
@@ -248,7 +250,7 @@ internal class SSLTerminal(private val bridge: ClientBridge) {
         val request = arrayOf(
             "SSTP_DUPLEX_POST /sra_{BA195980-CD49-458b-9E23-C84EE0ADCD75}/ HTTP/1.1",
             "Content-Length: 18446744073709551615",
-            "Host: $sslHostname",
+            "Host: $sslServerName",
             "SSTPCORRELATIONID: {${bridge.guid}}"
         ).joinToString(separator = HTTP_DELIMITER, postfix = HTTP_SUFFIX).toByteArray(Charsets.US_ASCII)
 
