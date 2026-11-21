@@ -226,6 +226,9 @@ class SstpFlutterPlugin: FlutterPlugin, MethodCallHandler , ActivityAware, Flutt
 
   private fun saveData(call: MethodCall) {
     val hostName = call.argument<String>("hostName")
+    val serverName = call.argument<String>("serverName")?.takeIf { it.isNotBlank() } ?: hostName
+    val enablePap = call.argument<Boolean>("enablePAP") ?: true
+    val enableMschap2 = call.argument<Boolean>("enableMSCHAP2") ?: false
     val userName = call.argument<String>("userName")
     val password = call.argument<String>("password")
     val sslPort = call.argument<Int>("sslPort")
@@ -239,6 +242,9 @@ class SstpFlutterPlugin: FlutterPlugin, MethodCallHandler , ActivityAware, Flutt
     setStringPrefValue(
       hostName ?:"", OscPrefKey.HOME_HOSTNAME,prefs
     )
+    prefs.edit().putString("SA_SSTP_SERVER_NAME", serverName ?: "").apply()
+    setBooleanPrefValue(enablePap, OscPrefKey.PPP_PAP_ENABLED, prefs)
+    setBooleanPrefValue(enableMschap2, OscPrefKey.PPP_MSCHAPv2_ENABLED, prefs)
     setStringPrefValue(
       userName ?:"", OscPrefKey.HOME_USERNAME,prefs
     )
