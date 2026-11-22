@@ -566,7 +566,7 @@ class _SaSstpHomePageState extends State<SaSstpHomePage> {
         actions: [
           IconButton(
             tooltip: 'إضافة سيرفر',
-            onPressed: _addCustomServer,
+            onPressed: () => _addCustomServer(),
             icon: const Icon(Icons.add_circle_outline),
           ),
         ],
@@ -605,6 +605,8 @@ class _SaSstpHomePageState extends State<SaSstpHomePage> {
                       .toList();
                   _selected = nextServers.isNotEmpty ? nextServers.first : null;
                 });
+                final selected = _selected;
+                if (selected != null) unawaited(_persistSelection(selected));
               },
             ),
             const SizedBox(height: 10),
@@ -651,10 +653,20 @@ class _SaSstpHomePageState extends State<SaSstpHomePage> {
                     '${selected.ip}:${selected.port}',
                     textDirection: TextDirection.ltr,
                   ),
-                  trailing: IconButton(
-                    onPressed: _addCustomServer,
-                    icon: const Icon(Icons.edit_outlined),
-                    tooltip: 'تعديل',
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        onPressed: () => _addCustomServer(editing: selected),
+                        icon: const Icon(Icons.edit_outlined),
+                        tooltip: 'تعديل',
+                      ),
+                      IconButton(
+                        onPressed: () => _deleteCustomServer(selected),
+                        icon: const Icon(Icons.delete_outline),
+                        tooltip: 'حذف',
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -711,14 +723,40 @@ class _SaSstpHomePageState extends State<SaSstpHomePage> {
                 DropdownMenuItem(value: 'MS-CHAPv2', child: Text('MS-CHAPv2')),
               ],
               onChanged: (value) {
-                if (value != null) setState(() => _authMethod = value);
+                if (value == null) return;
+                setState(() => _authMethod = value);
+                unawaited(_store.saveAuth(value).catchError((Object error) {
+                  if (mounted) _showMessage('تعذر حفظ طريقة المصادقة');
+                }));
               },
             ),
+            SwitchListTile(
+              title: const Text('تذكر بيانات الدخول على هذا الجهاز'),
+              subtitle: const Text(
+                'يُحفظ الحساب محلياً لاستعادته عند فتح التطبيق',
+                style: TextStyle(fontSize: 12),
+              ),
+              value: _rememberCredentials,
+              onChanged: _setRememberCredentials,
+            ),
+            Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: TextButton.icon(
+                onPressed: _clearCredentials,
+                icon: const Icon(Icons.delete_outline, size: 18),
+                label: const Text('مسح بيانات الدخول المحفوظة'),
+              ),
+            ),
+            if (_settingsWarning.isNotEmpty)
+              Text(
+                _settingsWarning,
+                style: const TextStyle(color: Colors.red, fontSize: 12),
+              ),
             const SizedBox(height: 16),
             SizedBox(
               height: 52,
               child: FilledButton.icon(
-                onPressed: _busy || connected ? null : _connect,
+                onPressed: _busy || _restoringSettings || connected ? null : _connect,
                 icon: _busy
                     ? const SizedBox(
                         width: 18,
@@ -739,7 +777,8 @@ class _SaSstpHomePageState extends State<SaSstpHomePage> {
             const Text(
               'ملاحظة: نجاح TCP/TLS لا يثبت نجاح مصادقة PPP. '
               'السيرفرات التي لم نختبر عليها بيانات الحساب ستُختبر عند الاتصال. '
-              'بيانات الحساب لا تُحفظ في قائمة السيرفرات.',
+              'السيرفرات المضافة تُحفظ على هذا الجهاز، '
+              'وبيانات الدخول تُستعاد عند تفعيل خيار تذكّرها.',
               style: TextStyle(fontSize: 12, color: Colors.black54, height: 1.5),
             ),
           ],
@@ -826,7 +865,7 @@ class _SaSstpHomePageState extends State<SaSstpHomePage> {
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
-        onTap: () => setState(() => _selected = server),
+        onTap: () => _selectServer(server),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
           child: Row(
@@ -835,7 +874,7 @@ class _SaSstpHomePageState extends State<SaSstpHomePage> {
                 radius: 19,
                 backgroundColor: const Color(0xFF087E72).withOpacity(.10),
                 child: Text(
-                  server.id,
+                  server.custom ? 'C' : server.id,
                   style: const TextStyle(
                     color: Color(0xFF087E72),
                     fontSize: 10,
@@ -861,9 +900,11 @@ class _SaSstpHomePageState extends State<SaSstpHomePage> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      previouslyConnected
-                          ? 'نجح اتصال PAP سابقاً على هذا السيرفر'
-                          : 'فحص TCP/TLS ناجح — مصادقة PPP غير مؤكدة',
+                      server.custom
+                          ? 'سيرفر مضاف يدوياً — لم يتم فحصه تلقائياً'
+                          : previouslyConnected
+                              ? 'نجح اتصال PAP سابقاً على هذا السيرفر'
+                              : 'فحص TCP/TLS ناجح — مصادقة PPP غير مؤكدة',
                       style: TextStyle(
                         fontSize: 10,
                         color: previouslyConnected
