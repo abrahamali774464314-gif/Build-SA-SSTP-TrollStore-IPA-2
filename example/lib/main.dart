@@ -366,15 +366,17 @@ class _SaSstpHomePageState extends State<SaSstpHomePage> {
     }
   }
 
-  Future<void> _addCustomServer() async {
-    final hostController = TextEditingController();
-    final ipController = TextEditingController();
-    final portController = TextEditingController(text: '1194');
+  Future<void> _addCustomServer({_ServerChoice? editing}) async {
+    final hostController = TextEditingController(text: editing?.host ?? '');
+    final ipController = TextEditingController(text: editing?.ip ?? '');
+    final portController = TextEditingController(
+      text: (editing?.port ?? 1194).toString(),
+    );
 
     final result = await showDialog<_ServerChoice>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('إضافة سيرفر يدوي'),
+        title: Text(editing == null ? 'إضافة سيرفر يدوي' : 'تعديل السيرفر'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -423,13 +425,12 @@ class _SaSstpHomePageState extends State<SaSstpHomePage> {
               final ip = ipController.text.trim();
               final port = int.tryParse(portController.text.trim());
               if (host.isEmpty || ip.isEmpty || port == null ||
-                  port < 1 || port > 65535) {
-                return;
-              }
+                  port < 1 || port > 65535) return;
               Navigator.pop(
                 dialogContext,
                 _ServerChoice(
-                  id: 'CUSTOM',
+                  id: editing?.id ??
+                      'CUSTOM-' + DateTime.now().microsecondsSinceEpoch.toString(),
                   host: host,
                   ip: ip,
                   region: _region,
@@ -438,7 +439,7 @@ class _SaSstpHomePageState extends State<SaSstpHomePage> {
                 ),
               );
             },
-            child: const Text('إضافة'),
+            child: Text(editing == null ? 'حفظ السيرفر' : 'حفظ التعديل'),
           ),
         ],
       ),
@@ -449,10 +450,78 @@ class _SaSstpHomePageState extends State<SaSstpHomePage> {
     portController.dispose();
 
     if (result == null || !mounted) return;
-    setState(() {
-      _selected = result;
-      _region = result.region;
-    });
+    final customServers = _servers.where((entry) => entry.custom).toList();
+    if (editing == null) {
+      customServers.add(result);
+    } else {
+      final index = customServers.indexWhere((s) => s.id == editing.id);
+      if (index < 0) return;
+      customServers[index] = result;
+    }
+
+    try {
+      await _store.saveCustomServers(
+        customServers.map((s) => s.toJson()).toList(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _servers.removeWhere((s) => s.custom);
+        _servers.addAll(customServers);
+        _selected = result;
+        _region = result.region;
+        _search.clear();
+      });
+      await _persistSelection(result);
+      if (mounted) _showMessage('تم حفظ السيرفر على هذا الجهاز');
+    } catch (_) {
+      if (mounted) _showMessage('لم نتمكن من حفظ السيرفر');
+    }
+  }
+
+  Future<void> _deleteCustomServer(_ServerChoice server) async {
+    if (!server.custom) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('حذف السيرفر؟'),
+        content: Text(server.host, textDirection: TextDirection.ltr),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('إلغاء'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('حذف'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final remaining = _servers
+        .where((item) => item.custom && item.id != server.id)
+        .toList();
+    try {
+      await _store.saveCustomServers(
+        remaining.map((s) => s.toJson()).toList(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _servers.removeWhere((s) => s.custom);
+        _servers.addAll(remaining);
+        if (_selected?.id == server.id) {
+          final regionServers = _servers.where((s) => s.region == _region);
+          _selected = regionServers.isNotEmpty
+              ? regionServers.first : _servers.first;
+        }
+      });
+      final selected = _selected;
+      if (selected != null) await _persistSelection(selected);
+      if (mounted) _showMessage('تم حذف السيرفر');
+    } catch (_) {
+      if (mounted) _showMessage('لم نتمكن من حذف السيرفر');
+    }
   }
 
   void _showMessage(String message) {
