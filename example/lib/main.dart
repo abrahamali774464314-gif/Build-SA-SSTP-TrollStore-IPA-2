@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:sstp_flutter/android_configuration_sstp.dart';
 import 'package:sstp_flutter/ios_configuration_sstp.dart';
 import 'package:sstp_flutter/server.dart';
 import 'package:sstp_flutter/sstp_flutter.dart';
 import 'server_catalog.dart';
+import 'app_storage.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -65,6 +68,25 @@ class _ServerChoice {
       papPreviouslyConnected: entry.papPreviouslyConnected,
     );
   }
+
+  factory _ServerChoice.fromJson(Map<String, dynamic> data) {
+    final id = data['id'] as String;
+    final host = data['host'] as String;
+    final ip = data['ip'] as String;
+    final region = data['region'] as String;
+    final port = data['port'] as int;
+    if (!id.startsWith('CUSTOM-') || host.isEmpty || ip.isEmpty ||
+        (region != 'SA' && region != 'AE') || port < 1 || port > 65535) {
+      throw const FormatException('Invalid custom server');
+    }
+    return _ServerChoice(
+      id: id, host: host, ip: ip, region: region, port: port, custom: true,
+    );
+  }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'id': id, 'host': host, 'ip': ip, 'region': region, 'port': port,
+  };
 }
 
 class SaSstpHomePage extends StatefulWidget {
@@ -76,6 +98,7 @@ class SaSstpHomePage extends StatefulWidget {
 
 class _SaSstpHomePageState extends State<SaSstpHomePage> {
   final SstpFlutter _vpn = SstpFlutter();
+  final SstpLocalStore _store = SstpLocalStore();
   final TextEditingController _username = TextEditingController();
   final TextEditingController _password = TextEditingController();
   final TextEditingController _search = TextEditingController();
@@ -91,6 +114,9 @@ class _SaSstpHomePageState extends State<SaSstpHomePage> {
   Duration _connectedFor = Duration.zero;
   bool _busy = false;
   bool _hidePassword = true;
+  bool _rememberCredentials = true;
+  bool _restoringSettings = true;
+  String _settingsWarning = '';
   String _authMethod = 'PAP';
 
   @override
@@ -100,6 +126,87 @@ class _SaSstpHomePageState extends State<SaSstpHomePage> {
     _search.addListener(() => setState(() {}));
     _registerCallbacks();
     _loadLastStatus();
+    _restoreSavedState();
+  }
+
+  Future<void> _restoreSavedState() async {
+    try {
+      final saved = await _store.load();
+      if (!mounted) return;
+      final customs = <_ServerChoice>[];
+      for (final data in saved.customServers) {
+        try {
+          customs.add(_ServerChoice.fromJson(data));
+        } catch (_) {
+          // Ignore damaged local entries without dropping other servers.
+        }
+      }
+      setState(() {
+        _servers.addAll(customs);
+        _rememberCredentials = saved.rememberLogin;
+        _authMethod = const ['PAP', 'CHAP', 'MS-CHAPv2'].contains(saved.authMethod)
+            ? saved.authMethod : 'PAP';
+        _username.text = saved.username;
+        _password.text = saved.password;
+        final choices = _servers.where((s) => s.id == saved.selectedId);
+        _selected = choices.isNotEmpty
+            ? choices.first : _servers.firstWhere((s) => s.id == 'SA46');
+        _region = _selected!.region;
+        _restoringSettings = false;
+        if (saved.credentialsUnavailable) {
+          _settingsWarning = 'تعذرت قراءة بيانات الدخول المحفوظة. أدخلها مجدداً.';
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _restoringSettings = false;
+        _settingsWarning = 'تعذر استعادة الإعدادات المحفوظة على الجهاز.';
+      });
+    }
+  }
+
+  Future<void> _persistSelection(_ServerChoice server) async {
+    try {
+      await _store.saveSelection(server.id, server.region);
+    } catch (_) {
+      if (mounted) _showMessage('تعذر حفظ اختيار السيرفر');
+    }
+  }
+
+  void _selectServer(_ServerChoice server) {
+    setState(() {
+      _selected = server;
+      _region = server.region;
+    });
+    unawaited(_persistSelection(server));
+  }
+
+  Future<void> _setRememberCredentials(bool remember) async {
+    final previous = _rememberCredentials;
+    setState(() => _rememberCredentials = remember);
+    try {
+      await _store.setRememberLogin(remember);
+      if (remember && _username.text.isNotEmpty && _password.text.isNotEmpty) {
+        await _store.saveCredentials(_username.text.trim(), _password.text);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _rememberCredentials = previous);
+      _showMessage('تعذر تحديث إعداد حفظ بيانات الدخول');
+    }
+  }
+
+  Future<void> _clearCredentials() async {
+    try {
+      await _store.deleteCredentials();
+      if (!mounted) return;
+      _username.clear();
+      _password.clear();
+      _showMessage('تم مسح بيانات الدخول المحفوظة');
+    } catch (_) {
+      if (mounted) _showMessage('تعذر مسح بيانات الدخول المحفوظة');
+    }
   }
 
   Future<void> _registerCallbacks() async {
@@ -187,7 +294,7 @@ class _SaSstpHomePageState extends State<SaSstpHomePage> {
       _showMessage('أدخل اسم المستخدم وكلمة المرور');
       return;
     }
-    if (_busy || _status == 'Connected') return;
+    if (_busy || _restoringSettings || _status == 'Connected') return;
 
     setState(() {
       _busy = true;
@@ -197,6 +304,13 @@ class _SaSstpHomePageState extends State<SaSstpHomePage> {
     });
 
     try {
+      if (_rememberCredentials) {
+        try {
+          await _store.saveCredentials(username, password);
+        } catch (_) {
+          if (mounted) _showMessage('تعذر حفظ كلمة المرور، سنحاول الاتصال.');
+        }
+      }
       final config = SSTPServer(
         // The IP is used for the TCP connection; serverName is the TLS SNI.
         host: server.ip,
