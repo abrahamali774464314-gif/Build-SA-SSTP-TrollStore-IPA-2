@@ -631,7 +631,7 @@ class _SaSstpHomePageState extends State<SaSstpHomePage> {
             ),
             const SizedBox(height: 8),
             Text(
-              '${_visibleServers.length} سيرفر متاح ضمن نتائج فحص TCP/TLS',
+              '${_visibleServers.length} سيرفر في القائمة — اليدوية غير مفحوصة',
               style: const TextStyle(color: Colors.black54, fontSize: 12),
             ),
             const SizedBox(height: 8),
