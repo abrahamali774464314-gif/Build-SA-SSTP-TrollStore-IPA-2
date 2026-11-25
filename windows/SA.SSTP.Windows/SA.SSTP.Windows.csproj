@@ -8,7 +8,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>SA_SSTP_Windows</AssemblyName>
     <RootNamespace>SaSstp</RootNamespace>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
     <Company>SA SSTP</Company>
     <Product>SA SSTP for Windows</Product>
     <Description>Secure SSTP VPN profile manager</Description>

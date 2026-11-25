@@ -37,6 +37,7 @@ internal sealed class Profile
 internal sealed class Settings
 {
     public string Selected { get; set; } = "SA46";
+    public bool AllowTemporaryDnsMapping { get; set; }
     public List<Profile> Profiles { get; set; } = new();
 }
 internal static class Store
@@ -163,7 +164,7 @@ internal static class Vpn
         var d=new DialParams{Size=(uint)Marshal.SizeOf<DialParams>(),Entry=p.Entry,Phone="",Callback="",User=login.User,Password=login.Password,Domain="",SubEntry=1};
         uint e=RasDial(IntPtr.Zero,null,ref d,0,IntPtr.Zero,out var h);
         d.Password="";d.User="";
-        if(e!=0){if(h!=IntPtr.Zero)RasHangUp(h);var b=new StringBuilder(512);RasGetErrorString(e,b,512);throw new InvalidOperationException("RAS "+e+": "+b);}
+        if(e!=0){if(h!=IntPtr.Zero)RasHangUp(h);var b=new StringBuilder(512);RasGetErrorString(e,b,512);string reason=b.ToString();if(e==0x80072AF9u)reason="تعذر العثور على اسم السيرفر في DNS.";if(string.IsNullOrWhiteSpace(reason))reason=new System.ComponentModel.Win32Exception(unchecked((int)(e&0xffff))).Message;throw new InvalidOperationException($"RAS {e} (0x{e:X8}): {reason}");}
     }
     public static async Task Disconnect(Profile p)
     {
@@ -199,7 +200,7 @@ internal sealed class Window:Form
     static Label LabelOf(string s)=>new(){Text=s,AutoSize=true,Font=new Font("Segoe UI",10,FontStyle.Bold)};
     public Window(Settings state)
     {
-        data=state;Text="SA SSTP | Windows 1.0.0";Icon=SystemIcons.Shield;Font=new Font("Segoe UI",10);StartPosition=FormStartPosition.CenterScreen;Size=new Size(1080,780);MinimumSize=new Size(850,630);RightToLeft=RightToLeft.Yes;RightToLeftLayout=true;BackColor=Color.FromArgb(243,247,248);
+        data=state;Text="SA SSTP | Windows 1.0.1";Icon=SystemIcons.Shield;Font=new Font("Segoe UI",10);StartPosition=FormStartPosition.CenterScreen;Size=new Size(1080,780);MinimumSize=new Size(850,630);RightToLeft=RightToLeft.Yes;RightToLeftLayout=true;BackColor=Color.FromArgb(243,247,248);
         var layout=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=2,RowCount=2,Padding=new Padding(14)};
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,44));layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,56));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,82));layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));
         var title=new Label{Text="SA SSTP   |   اتصال آمن وإدارة السيرفرات",Font=new Font("Segoe UI",19,FontStyle.Bold),ForeColor=Color.White,BackColor=Color.FromArgb(18,50,66),Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleCenter};layout.Controls.Add(title,0,0);layout.SetColumnSpan(title,2);
@@ -215,7 +216,7 @@ internal sealed class Window:Form
         Row(LabelOf("السيرفر المختار"));Row(endpoint);Row(LabelOf("اسم المستخدم"));Row(user);Row(LabelOf("كلمة المرور"));Row(pass);
         var show=new CheckBox{Text="إظهار كلمة المرور",AutoSize=true};show.CheckedChanged+=(_,_)=>pass.UseSystemPasswordChar=!show.Checked;Row(show);
         Row(LabelOf("مصادقة PPP"));Row(auth);Row(remember);Row(reconnect);Row(Flow(save,forget));Row(LabelOf("حالة اتصال Windows"));Row(status);Row(detail);connect.MinimumSize=new Size(190,48);Row(connect);
-        Row(new Label{Text="TLS: التحقق من الشهادة مفعل. اتصال Windows يعتمد على DNS للنطاق؛ IP في القائمة مرجعي. لا تُرسل كلمات المرور في سطر الأوامر.",AutoSize=true,MaximumSize=new Size(490,0),ForeColor=Color.DimGray});
+        Row(new Label{Text="TLS: التحقق من الشهادة مفعل. عند تعذر DNS أو اختلافه عن IP المحدد، يمكن استخدام ربط مؤقت للسيرفر المختار بعد الموافقة وبصلاحيات المسؤول. لا تُرسل كلمات المرور في سطر الأوامر.",AutoSize=true,MaximumSize=new Size(490,0),ForeColor=Color.DimGray});
         var panel=new Panel{Dock=DockStyle.Fill,AutoScroll=true,Padding=new Padding(10,0,0,0)};panel.Controls.Add(right);layout.Controls.Add(panel,1,1);Controls.Add(layout);
         filter.SelectedIndexChanged+=(_,_)=>RefreshList();search.TextChanged+=(_,_)=>RefreshList();list.SelectedIndexChanged+=(_,_)=>SelectProfile();
         add.Click+=(_,_)=>Guard(()=>EditProfile(null));edit.Click+=(_,_)=>Guard(()=>EditProfile(selected));remove.Click+=async(_,_)=>await Work(DeleteProfile);
@@ -255,7 +256,38 @@ internal sealed class Window:Form
     void ControlsState(){foreach(var c in new Control[]{list,filter,search,add,export,import})c.Enabled=!busy;foreach(var c in new Control[]{user,pass,remember,reconnect,auth,save,forget})c.Enabled=!busy&&selected!=null&&active?.Id!=selected.Id;edit.Enabled=remove.Enabled=!busy&&selected?.Custom==true&&selected.Id!=active?.Id;connect.Enabled=!busy&&(selected!=null||active!=null||retryProfile!=null);connect.Text=active!=null?"فصل الاتصال":retryProfile!=null?"إلغاء إعادة الاتصال":"اتصال SSTP";}
     async Task Work(Func<Task> task){if(busy)return;busy=true;ControlsState();try{await task();}catch(Exception e){detail.Text=e.Message;Error(e);}finally{busy=false;ControlsState();}}
     async Task Toggle(){if(active!=null){await Stop();return;}if(retryProfile!=null){retryProfile=null;sessionLogin=null;manualDisconnect=true;status.Text="غير متصل";detail.Text="تم إلغاء إعادة الاتصال.";return;}if(selected==null)return;var p=selected;var login=CurrentLogin();if(p.Remember)SaveLogin(false);manualDisconnect=false;retryProfile=null;sessionLogin=null;retries=0;await Start(p,login);}
-    async Task Start(Profile p,Login login){status.Text="جاري الاتصال...";status.ForeColor=Color.DarkOrange;detail.Text=p.Endpoint;try{await Vpn.Prepare(p);await Task.Run(()=>Vpn.Connect(p,login));active=p;sessionLogin=login;since=DateTimeOffset.Now;status.Text="متصل: "+p.Name;status.ForeColor=Color.SeaGreen;detail.Text="تم إنشاء نفق SSTP بواسطة Windows.";}catch{status.Text="غير متصل";status.ForeColor=Color.Firebrick;throw;}}
+    async Task Start(Profile p,Login login)
+    {
+        status.Text="جاري الاتصال...";status.ForeColor=Color.DarkOrange;detail.Text=p.Endpoint;
+        TemporaryDns? mapping=null;
+        try
+        {
+            await Vpn.Prepare(p);
+            if(await TemporaryDns.NeedsMapping(p))
+            {
+                if(!TemporaryDns.IsAdmin())throw new InvalidOperationException("اسم السيرفر لا يحل إلى IP المحدد. أغلق التطبيق من قائمة الأيقونة بجوار الساعة، ثم افتحه عبر Run as administrator واضغط اتصال.");
+                if(!data.AllowTemporaryDnsMapping)
+                {
+                    var consent=MessageBox.Show(this,"يحتاج Windows إلى ربط اسم السيرفر بعنوان IP المحدد مؤقتاً أثناء إنشاء اتصال SSTP. سيضاف سطر خاص بالتطبيق إلى hosts ويزال بعد محاولة الاتصال. يبقى التحقق من شهادة TLS مفعلاً. هل تسمح بهذا الربط عند الحاجة؟","السماح بالربط المؤقت",MessageBoxButtons.YesNo,MessageBoxIcon.Question);
+                    if(consent!=DialogResult.Yes)throw new InvalidOperationException("لم يتم السماح بالربط المؤقت.");
+                    data.AllowTemporaryDnsMapping=true;Store.Save(data);
+                }
+                detail.Text="تهيئة الربط المؤقت: "+p.Host+" → "+p.Ip;
+                mapping=await TemporaryDns.Create(p);
+            }
+            await Task.Run(()=>Vpn.Connect(p,login));
+            active=p;sessionLogin=login;since=DateTimeOffset.Now;status.Text="متصل: "+p.Name;status.ForeColor=Color.SeaGreen;detail.Text="تم إنشاء نفق SSTP بواسطة Windows.";
+        }
+        catch{status.Text="غير متصل";status.ForeColor=Color.Firebrick;throw;}
+        finally
+        {
+            if(mapping!=null)
+            {
+                try{mapping.Dispose();}
+                catch(Exception e){detail.Text="تحذير: تعذرت إزالة الربط المؤقت. أعد فتح التطبيق كمسؤول لتنظيفه. "+e.Message;MessageBox.Show(this,detail.Text,"SA SSTP",MessageBoxButtons.OK,MessageBoxIcon.Warning);}
+            }
+        }
+    }
     async Task Stop(){if(active==null)return;manualDisconnect=true;retryProfile=null;var p=active;await Vpn.Disconnect(p);active=null;sessionLogin=null;since=null;retries=0;status.Text="غير متصل";status.ForeColor=Color.DimGray;detail.Text="تم فصل الاتصال.";}
     async Task Poll()
     {
@@ -290,10 +322,11 @@ internal static class Program
     {
         if(args.Contains("--self-test"))return SelfTest();
         if(args.Contains("--credential-self-test"))return CredentialSelfTest();
+        if(args.Contains("--dns-self-test"))return TemporaryDns.SelfTest();
         using var mutex=new Mutex(true,"Local\\SA_SSTP_Windows",out bool first);
         if(!first){MessageBox.Show("SA SSTP يعمل بالفعل بجوار الساعة.");return 0;}
         ApplicationConfiguration.Initialize();
-        try{var st=Store.Load(Store.PathName);Store.Save(st);Application.Run(new Window(st));return 0;}catch(Exception e){MessageBox.Show("تعذر تشغيل التطبيق. لم تُحذف الإعدادات الأصلية.\n"+e.Message,"SA SSTP",MessageBoxButtons.OK,MessageBoxIcon.Error);return 1;}
+        try{if(TemporaryDns.IsAdmin())TemporaryDns.Recover();var st=Store.Load(Store.PathName);Store.Save(st);Application.Run(new Window(st));return 0;}catch(Exception e){MessageBox.Show("تعذر تشغيل التطبيق. لم تُحذف الإعدادات الأصلية.\n"+e.Message,"SA SSTP",MessageBoxButtons.OK,MessageBoxIcon.Error);return 1;}
     }
     static int CredentialSelfTest()
     {
