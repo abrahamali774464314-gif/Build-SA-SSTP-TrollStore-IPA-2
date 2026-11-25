@@ -1,0 +1,45 @@
+name: Build SA SSTP Windows EXE
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'windows/**'
+      - '.github/workflows/build-windows.yml'
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build and publish standalone Windows executable
+        shell: pwsh
+        run: |
+          dotnet publish windows/SA.SSTP.Windows/SA.SSTP.Windows.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -o dist/windows
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!(Test-Path 'dist/windows/SA_SSTP_Windows.exe')) { throw 'Executable missing' }
+      - name: Run profile persistence and validation self-tests
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath (Resolve-Path 'dist/windows/SA_SSTP_Windows.exe') -ArgumentList '--self-test' -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "Self-test failed: $($proc.ExitCode)" }
+      - name: Generate release checksums
+        shell: pwsh
+        run: |
+          Copy-Item windows/README_AR.md dist/windows/README_AR.md
+          $hash = (Get-FileHash dist/windows/SA_SSTP_Windows.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  SA_SSTP_Windows.exe" | Set-Content dist/windows/SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SA_SSTP_Windows_EXE
+          path: |
+            dist/windows/SA_SSTP_Windows.exe
+            dist/windows/README_AR.md
+            dist/windows/SHA256.txt
+          if-no-files-found: error
+          retention-days: 30
