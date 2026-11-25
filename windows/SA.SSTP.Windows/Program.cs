@@ -148,8 +148,8 @@ internal static class Vpn
     public static async Task Prepare(Profile p)
     {
         p.Check();string name=Q(p.Entry),endpoint=Q(p.Endpoint);
-        string options="-Name "+name+" -ServerAddress "+endpoint+" -TunnelType Sstp -AuthenticationMethod "+p.Auth+" -EncryptionLevel "+(p.Auth=="PAP"?"Optional":"Required")+" -SplitTunneling $false -RememberCredential $false -Force";
-        await PS("if(Get-VpnConnection -Name "+name+" -ErrorAction SilentlyContinue){Set-VpnConnection "+options+" | Out-Null}else{Add-VpnConnection "+options+" | Out-Null}");
+        string options="-Name "+name+" -ServerAddress "+endpoint+" -TunnelType Sstp -AuthenticationMethod "+p.Auth+" -EncryptionLevel "+(p.Auth=="MSChapv2"?"Required":"Optional")+" -Force";
+        await PS("if(Get-VpnConnection -Name "+name+" -ErrorAction SilentlyContinue){Set-VpnConnection "+options+" -SplitTunneling $false -RememberCredential $false | Out-Null}else{Add-VpnConnection "+options+" | Out-Null}");
     }
     public static async Task<HashSet<string>> Active()
     {
@@ -252,19 +252,19 @@ internal sealed class Window:Form
     }
     Login CurrentLogin(){if(string.IsNullOrWhiteSpace(user.Text)||string.IsNullOrEmpty(pass.Text))throw new ArgumentException("أدخل اسم المستخدم وكلمة المرور.");return new Login(user.Text.Trim(),pass.Text);}
     void SaveLogin(bool notify){if(selected==null)return;if(!remember.Checked)throw new InvalidOperationException("فعّل تذكر الحساب أولاً.");Vault.Put(selected.Id,CurrentLogin());Store.Save(data);if(notify)detail.Text="تم حفظ الحساب لهذا السيرفر في Windows Credential Manager.";}
-    void ControlsState(){foreach(var c in new Control[]{list,filter,search,add,export,import})c.Enabled=!busy;foreach(var c in new Control[]{user,pass,remember,reconnect,auth,save,forget})c.Enabled=!busy&&selected!=null&&active?.Id!=selected.Id;edit.Enabled=remove.Enabled=!busy&&selected?.Custom==true&&selected.Id!=active?.Id;connect.Enabled=!busy&&(selected!=null||active!=null);connect.Text=active==null?"اتصال SSTP":"فصل الاتصال";}
+    void ControlsState(){foreach(var c in new Control[]{list,filter,search,add,export,import})c.Enabled=!busy;foreach(var c in new Control[]{user,pass,remember,reconnect,auth,save,forget})c.Enabled=!busy&&selected!=null&&active?.Id!=selected.Id;edit.Enabled=remove.Enabled=!busy&&selected?.Custom==true&&selected.Id!=active?.Id;connect.Enabled=!busy&&(selected!=null||active!=null||retryProfile!=null);connect.Text=active!=null?"فصل الاتصال":retryProfile!=null?"إلغاء إعادة الاتصال":"اتصال SSTP";}
     async Task Work(Func<Task> task){if(busy)return;busy=true;ControlsState();try{await task();}catch(Exception e){detail.Text=e.Message;Error(e);}finally{busy=false;ControlsState();}}
-    async Task Toggle(){if(active!=null){await Stop();return;}if(selected==null)return;var p=selected;var login=CurrentLogin();if(p.Remember)SaveLogin(false);manualDisconnect=false;retries=0;await Start(p,login);}
+    async Task Toggle(){if(active!=null){await Stop();return;}if(retryProfile!=null){retryProfile=null;sessionLogin=null;manualDisconnect=true;status.Text="غير متصل";detail.Text="تم إلغاء إعادة الاتصال.";return;}if(selected==null)return;var p=selected;var login=CurrentLogin();if(p.Remember)SaveLogin(false);manualDisconnect=false;retryProfile=null;sessionLogin=null;retries=0;await Start(p,login);}
     async Task Start(Profile p,Login login){status.Text="جاري الاتصال...";status.ForeColor=Color.DarkOrange;detail.Text=p.Endpoint;try{await Vpn.Prepare(p);await Task.Run(()=>Vpn.Connect(p,login));active=p;sessionLogin=login;since=DateTimeOffset.Now;status.Text="متصل: "+p.Name;status.ForeColor=Color.SeaGreen;detail.Text="تم إنشاء نفق SSTP بواسطة Windows.";}catch{status.Text="غير متصل";status.ForeColor=Color.Firebrick;throw;}}
-    async Task Stop(){if(active==null)return;manualDisconnect=true;var p=active;await Vpn.Disconnect(p);active=null;sessionLogin=null;since=null;retries=0;status.Text="غير متصل";status.ForeColor=Color.DimGray;detail.Text="تم فصل الاتصال.";}
+    async Task Stop(){if(active==null)return;manualDisconnect=true;retryProfile=null;var p=active;await Vpn.Disconnect(p);active=null;sessionLogin=null;since=null;retries=0;status.Text="غير متصل";status.ForeColor=Color.DimGray;detail.Text="تم فصل الاتصال.";}
     async Task Poll()
     {
         if(busy)return;busy=true;ControlsState();try
         {
             var connected=await Vpn.Active();var found=data.Profiles.FirstOrDefault(p=>connected.Contains(p.Entry));
-            if(found!=null){if(active?.Id!=found.Id){active=found;since=DateTimeOffset.Now;sessionLogin=found.Remember?Vault.Get(found.Id):null;retries=0;}status.Text="متصل: "+found.Name+"  "+(DateTimeOffset.Now-(since??DateTimeOffset.Now)).ToString(@"hh\:mm\:ss");status.ForeColor=Color.SeaGreen;return;}
+            if(found!=null){if(active?.Id!=found.Id){retryProfile=null;active=found;since=DateTimeOffset.Now;sessionLogin=found.Remember?Vault.Get(found.Id):null;retries=0;}status.Text="متصل: "+found.Name+"  "+(DateTimeOffset.Now-(since??DateTimeOffset.Now)).ToString(@"hh\:mm\:ss");status.ForeColor=Color.SeaGreen;return;}
             if(active!=null){var p=active;active=null;since=null;status.Text="انقطع الاتصال";status.ForeColor=Color.Firebrick;if(!manualDisconnect&&p.Reconnect&&sessionLogin!=null){retryProfile=p;nextRetry=DateTimeOffset.Now.AddSeconds(5);retries=0;}else sessionLogin=null;}
-            if(retryProfile!=null&&!manualDisconnect&&sessionLogin!=null&&DateTimeOffset.Now>=nextRetry&&retries<3){var p=retryProfile;var l=sessionLogin;retries++;try{await Start(p,l);retryProfile=null;}catch(Exception e){detail.Text="إعادة الاتصال "+retries+"/3: "+e.Message;nextRetry=DateTimeOffset.Now.AddSeconds(15*retries);if(retries>=3){retryProfile=null;sessionLogin=null;}}}
+            if(retryProfile!=null&&!manualDisconnect&&sessionLogin!=null&&DateTimeOffset.Now>=nextRetry&&retries<3){var p=retryProfile;var l=sessionLogin;retries++;try{await Start(p,l);retryProfile=null;}catch(Exception e){detail.Text="إعادة الاتصال "+retries+"/3: "+e.Message;nextRetry=DateTimeOffset.Now.AddSeconds(15*retries);if(retries>=3){retryProfile=null;sessionLogin=null;status.Text="غير متصل — توقفت محاولات إعادة الاتصال";}}}
             else if(active==null&&retryProfile==null){status.Text="غير متصل";status.ForeColor=Color.DimGray;}
         }catch(Exception e){status.Text="تعذر التحقق من حالة Windows";status.ForeColor=Color.DarkOrange;detail.Text=e.Message;}finally{busy=false;ControlsState();}
     }
@@ -277,7 +277,7 @@ internal sealed class Window:Form
         var n=new TextBox{Text=p?.Name??"",Dock=DockStyle.Fill};var h=new TextBox{Text=p?.Host??"",Dock=DockStyle.Fill,RightToLeft=RightToLeft.No};var ip=new TextBox{Text=p?.Ip??"",Dock=DockStyle.Fill,RightToLeft=RightToLeft.No};var port=new NumericUpDown{Minimum=1,Maximum=65535,Value=p?.Port??443,Dock=DockStyle.Fill};var r=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,Dock=DockStyle.Fill};r.Items.AddRange(new object[]{"SA","AE","OTHER"});r.SelectedItem=p?.Region??"OTHER";
         int i=0;foreach(var pair in new (string,Control)[]{("اسم السيرفر",n),("DNS / SNI",h),("IP مرجعي",ip),("TCP Port",port),("الدولة",r)}){grid.RowStyles.Add(new RowStyle(SizeType.Absolute,49));grid.Controls.Add(LabelOf(pair.Item1),0,i);grid.Controls.Add(pair.Item2,1,i++);}
         var ok=Btn("حفظ",true);var cancel=Btn("إلغاء");cancel.DialogResult=DialogResult.Cancel;grid.Controls.Add(Flow(ok,cancel),1,5);dlg.Controls.Add(grid);dlg.CancelButton=cancel;
-        ok.Click+=(_,_)=>{try{var value=new Profile{Id=p?.Id??Guid.NewGuid().ToString("N"),Name=n.Text.Trim(),Host=h.Text.Trim(),Ip=ip.Text.Trim(),Port=(int)port.Value,Region=r.Text,Auth=p?.Auth??"PAP",Remember=p?.Remember??true,Reconnect=p?.Reconnect??false,Custom=true};value.Check();if(data.Profiles.Any(x=>x.Id!=value.Id&&x.Host.Equals(value.Host,StringComparison.OrdinalIgnoreCase)&&x.Port==value.Port))throw new ArgumentException("هذا السيرفر موجود بالفعل.");if(p==null)data.Profiles.Add(value);else data.Profiles[data.Profiles.IndexOf(p)]=value;Store.Save(data);selected=value;data.Selected=value.Id;filter.SelectedIndex=0;search.Clear();RefreshList();dlg.DialogResult=DialogResult.OK;}catch(Exception e){MessageBox.Show(dlg,e.Message,"التحقق",MessageBoxButtons.OK,MessageBoxIcon.Warning);}};
+        ok.Click+=(_,_)=>{try{var value=new Profile{Id=p?.Id??Guid.NewGuid().ToString("N"),Name=n.Text.Trim(),Host=h.Text.Trim(),Ip=ip.Text.Trim(),Port=(int)port.Value,Region=r.Text,Auth=p?.Auth??"PAP",Remember=p?.Remember??true,Reconnect=p?.Reconnect??false,Custom=true};value.Check();if(data.Profiles.Any(x=>x.Id!=value.Id&&x.Host.Equals(value.Host,StringComparison.OrdinalIgnoreCase)&&x.Port==value.Port))throw new ArgumentException("هذا السيرفر موجود بالفعل.");if(p==null)data.Profiles.Add(value);else data.Profiles[data.Profiles.IndexOf(p)]=value;data.Selected=value.Id;Store.Save(data);selected=value;filter.SelectedIndex=0;search.Clear();RefreshList();dlg.DialogResult=DialogResult.OK;}catch(Exception e){MessageBox.Show(dlg,e.Message,"التحقق",MessageBoxButtons.OK,MessageBoxIcon.Warning);}};
         dlg.ShowDialog(this);
     }
     async Task DeleteProfile(){if(selected is not {Custom:true} p||p.Id==active?.Id)return;if(MessageBox.Show(this,"حذف السيرفر وحسابه المحفوظ؟","تأكيد",MessageBoxButtons.YesNo)!=DialogResult.Yes)return;await Vpn.Remove(p);Vault.Erase(p.Id);data.Profiles.Remove(p);selected=null;Store.Save(data);RefreshList();}
@@ -289,10 +289,16 @@ internal static class Program
     [STAThread] static int Main(string[] args)
     {
         if(args.Contains("--self-test"))return SelfTest();
+        if(args.Contains("--credential-self-test"))return CredentialSelfTest();
         using var mutex=new Mutex(true,"Local\\SA_SSTP_Windows",out bool first);
         if(!first){MessageBox.Show("SA SSTP يعمل بالفعل بجوار الساعة.");return 0;}
         ApplicationConfiguration.Initialize();
         try{var st=Store.Load(Store.PathName);Store.Save(st);Application.Run(new Window(st));return 0;}catch(Exception e){MessageBox.Show("تعذر تشغيل التطبيق. لم تُحذف الإعدادات الأصلية.\n"+e.Message,"SA SSTP",MessageBoxButtons.OK,MessageBoxIcon.Error);return 1;}
+    }
+    static int CredentialSelfTest()
+    {
+        string a="CI-"+Guid.NewGuid().ToString("N"), b="CI-"+Guid.NewGuid().ToString("N");
+        try { Vault.Put(a,new Login("user-a","test-secret-a"));Vault.Put(b,new Login("user-b","test-secret-b"));if(Vault.Get(a)!=new Login("user-a","test-secret-a")||Vault.Get(b)!=new Login("user-b","test-secret-b"))return 2;Vault.Erase(a);if(Vault.Get(a)!=null||Vault.Get(b)==null)return 3;return 0; }catch{return 4;}finally{try{Vault.Erase(a);Vault.Erase(b);}catch{}}
     }
     static int SelfTest()
     {

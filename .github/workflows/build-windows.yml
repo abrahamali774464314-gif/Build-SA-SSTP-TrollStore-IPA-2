@@ -28,6 +28,11 @@ jobs:
         run: |
           $proc = Start-Process -FilePath (Resolve-Path 'dist/windows/SA_SSTP_Windows.exe') -ArgumentList '--self-test' -Wait -PassThru
           if ($proc.ExitCode -ne 0) { throw "Self-test failed: $($proc.ExitCode)" }
+      - name: Test separate protected credentials and deletion
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath (Resolve-Path 'dist/windows/SA_SSTP_Windows.exe') -ArgumentList '--credential-self-test' -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "Credential self-test failed: $($proc.ExitCode)" }
       - name: Generate release checksums
         shell: pwsh
         run: |
