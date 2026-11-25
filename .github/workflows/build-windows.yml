@@ -38,6 +38,11 @@ jobs:
         run: |
           $proc = Start-Process -FilePath (Resolve-Path 'dist/windows/SA_SSTP_Windows.exe') -ArgumentList '--dns-self-test' -Wait -PassThru
           if ($proc.ExitCode -ne 0) { throw "DNS self-test failed: $($proc.ExitCode)" }
+      - name: Verify shared account migration rules
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath (Resolve-Path 'dist/windows/SA_SSTP_Windows.exe') -ArgumentList '--shared-login-self-test' -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "Shared login self-test failed: $($proc.ExitCode)" }
       - name: Generate release checksums
         shell: pwsh
         run: |
